@@ -290,7 +290,7 @@ void spatialMaxPool_updateOutput
 (
  // raw pointers:
  float *images, float *targets,
- // numImgColors == numFilters
+ // numImgColors == numFilters, imgSizeY:inputHeight
  int numFilters, int imgSizeY, int imgSizeX, int numImages,
  // numModulesY == numModulesX == outputsX
  int numModulesY, int numModulesX, 
