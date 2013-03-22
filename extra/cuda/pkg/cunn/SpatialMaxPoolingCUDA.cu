@@ -15,10 +15,11 @@ static int cunn_SpatialMaxPoolingCUDA_updateOutput(lua_State *L)
 
   luaL_argcheck(L, input->nDimension == 4, 2, "4D (batch) tensor expected");
 
-  long nInputCols = input->size[2];
-  long nInputRows = input->size[1];
   long nInputPlane = input->size[0];
+  long nInputRows = input->size[1];
+  long nInputCols = input->size[2];
   long batchSize = input->size[3];
+
   long nOutputCols = (nInputCols - kW) / dW + 1;
   long nOutputRows = (nInputRows - kH) / dH + 1;
 
