@@ -44,7 +44,7 @@ static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
   float *input_data = THCudaTensor_data(input);
   float *weight_data = THCudaTensor_data(weight);
 
-  THCudaTensor_resize4d(output, batchSize, nInputPlane, nOutputRows, nOutputCols);
+  THCudaTensor_resize4d(output, batchSize, nOutputPlane, nOutputRows, nOutputCols);
   float *output_data = THCudaTensor_data(output);
 
   // convolutions
