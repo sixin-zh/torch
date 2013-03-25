@@ -12,6 +12,7 @@
 #include "LogSoftMax.cu"
 #include "TemporalConvolution.cu"
 #include "SpatialConvolution.cu"
+#include "SpatialConvolutionBatch.cu"
 #include "SpatialConvolutionMap.cu"
 #include "SpatialConvolutionCUDA.cu"
 #include "SpatialSubSampling.cu"
