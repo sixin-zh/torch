@@ -1,4 +1,4 @@
-// TODO updateGradInput, accGradParameters, add bias
+// TODO square, updateGradInput, accGradParameters, add bias
 
 #ifndef DIVUP
 #define DIVUP(x,y) (((x) + (y) - 1) / (y))
@@ -29,13 +29,13 @@ static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
   long nInputCols = input->size[3];
 
   long nOutputPlane = weight->size[0];
-  long nOutputCols = (nInputCols - kW) / dW + 1;
   long nOutputRows = (nInputRows - kH) / dH + 1;
+  long nOutputCols = (nInputCols - kW) / dW + 1;
 
   luaL_argcheck(L, nInputPlane == weight->size[1], 2, "number of input plane not consistent");
   luaL_argcheck(L, nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
 
-  // all the data must be contiguous: 
+  // all the data must be contiguous
   luaL_argcheck(L, THCudaTensor_isContiguous(input), 2, "input must be contiguous");
   luaL_argcheck(L, THCudaTensor_isContiguous(weight), 1, "weight must be contiguous");
   luaL_argcheck(L, THCudaTensor_isContiguous(output), 1, "output must be contiguous");
@@ -50,7 +50,7 @@ static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
   // convolutions
   spatialConvB_updateOutput(
     input_data, weight_data, output_data,
-    batchSize, nInputPlane, nOutputRows, nOutputCols,
+    batchSize, nInputPlane, nInputRows, nInputCols,
     nOutputPlane, nOutputRows, nOutputCols,
     kH, kW,
     0, dW
