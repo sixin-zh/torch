@@ -53,3 +53,9 @@ end
 function SpatialConvolutionBatch:accGradParameters(input, gradOutput, scale)
    return input.nn.SpatialConvolutionBatch_accGradParameters(self, input, gradOutput, scale)
 end
+
+-- this routine copies weight+bias from a regular SpatialConvolution module
+function SpatialConvolutionBatch:copy(sc)
+   self.weight:copy(sc.weight)
+   self.bias:copy(sc.bias)
+end
