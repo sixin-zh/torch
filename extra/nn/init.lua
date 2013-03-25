@@ -57,6 +57,7 @@ include('Threshold.lua')
 
 include('LookupTable.lua')
 include('SpatialConvolution.lua')
+include('SpatialConvolutionBatch.lua')
 include('SpatialFullConvolution.lua')
 include('SpatialFullConvolutionMap.lua')
 include('SpatialConvolutionMM.lua')

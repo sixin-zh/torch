@@ -34,6 +34,7 @@ DLL_EXPORT TH_API int luaopen_libcunn(lua_State *L)
   cunn_LogSoftMax_init(L);
   cunn_TemporalConvolution_init(L);
   cunn_SpatialConvolution_init(L);
+  cunn_SpatialConvolutionBatch_init(L);
   cunn_SpatialConvolutionCUDA_init(L);
   cunn_SpatialConvolutionMap_init(L);
   cunn_SpatialMaxPooling_init(L);
