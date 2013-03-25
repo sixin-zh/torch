@@ -1,4 +1,6 @@
 
+#include <assert.h>
+
 // assume: shKerLoads >= 1, shImgLoads >= 1, assert(mod==0)
 template < int B_Y, int B_X, int imgsPerThread, int filtersPerThread,
            int colorCache, int pixelCache, bool checkImgBounds >
@@ -157,7 +159,7 @@ void spatialConvB_updateOutput
  // raw pointers:
  float *input, float *kernel, float *output,
  // input dim:
- int numImgColors, int imgSizeY, int imgSizeX, int numImages,
+ int numImages, int numImgColors, int imgSizeY, int imgSizeX,
  // output dim:
  int numFilters, int numModulesY, int numModulesX, 
  // filter size:
@@ -168,6 +170,8 @@ void spatialConvB_updateOutput
 {
   assert(filterSizeX == filterSizeY);  // TODO SQUARE !
   int filterSize = filterSizeX;
+
+  int numModules = numModulesX * numModulesY;
 
   const int B_X = 32;
   const int B_Y = 4; 

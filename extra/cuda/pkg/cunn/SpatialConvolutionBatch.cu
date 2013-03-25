@@ -5,10 +5,10 @@
 #endif
 
 #include "SpatialConvolutionBatch/updateOutput.cu"
-#include "SpatialConvolutionBatch/updateGradInput.cu"
-#include "SpatialConvolutionBatch/accGradParameters.cu"
+///#include "SpatialConvolutionBatch/updateGradInput.cu"
+///#include "SpatialConvolutionBatch/accGradParameters.cu"
 
-static int cunn_SpatialConvolution_updateOutput(lua_State *L) {
+static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
 
   int kW = luaT_getfieldcheckint(L, 1, "kW");
   int kH = luaT_getfieldcheckint(L, 1, "kH");
@@ -49,9 +49,9 @@ static int cunn_SpatialConvolution_updateOutput(lua_State *L) {
 
   // convolutions
   spatialConvB_updateOutput(
-    input_data, gradOutput_data, gradWeight_data,
-    nInputPlane, inputHeight, inputWidth, batchSize,
-    nOutputPlane, outputHeight, outputWidth,
+    input_data, weight_data, output_data,
+    batchSize, nInputPlane, nOutputRows, nOutputCols,
+    nOutputPlane, nOutputRows, nOutputCols,
     kH, kW,
     0, dW
   );
@@ -59,7 +59,7 @@ static int cunn_SpatialConvolution_updateOutput(lua_State *L) {
   return 1;
 }
 
-static int cunn_SpatialConvolutionCUDA_updateGradInput(lua_State *L) {
+static int cunn_SpatialConvolutionBatch_updateGradInput(lua_State *L) {
   return 1;
 }
 
