@@ -1,4 +1,4 @@
-// TODO square, updateGradInput, accGradParameters, add bias
+// updateGradInput, accGradParameters, add bias
 
 #include "SpatialConvolutionBatch/updateOutput.cu"
 ///#include "SpatialConvolutionBatch/updateGradInput.cu"
