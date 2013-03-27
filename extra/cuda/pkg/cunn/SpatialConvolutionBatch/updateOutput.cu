@@ -1,31 +1,45 @@
+// 2D Convolution (cuda) kernel - 'vx' mode 
+//
+// assume: B_Y*B_X % cPixelCache == 0
+//         numImages % B_X*imgsPerThread == 0
+//         numFilters % B_Y*filtersPerThread == 0
+//         B_Y*filtersPerThread % B_Y*B_X/cPixelCache == 0
+//         B_X*imgsPerThread % B_Y*B_X/cPixelCache == 0
+//
+// default: B_Y = B_X = cPixelCache = 16
+//          numImages % 16 == 0, numFilters % 16 == 0
+//  
+// Author: Sixin Zhang (zsx@cims.nyu.edu)
 
 #include <assert.h>
 
-// assume: shKerLoads >= 1, shImgLoads >= 1, assert(mod==0)
-template < int B_Y, int B_X, int imgsPerThread, int filtersPerThread,
-           int colorCache, int pixelCache, bool checkImgBounds >
-  __global__ void _filterActs_YxX_sparse
-  (
-   float* images, float* filters, float* targets,
-   const int numImages, const int numFilters,
-   const int imgSizeY, const int imgSizeX, 
-   const int filterSize, const int paddingStart,
-   const int moduleStride, const int numModulesY, const int numModulesX, 
-   const int numImgColors
-   )
-{
+#ifndef MIN
+#define MIN(a,b) (a) < (b) ? (a) : (b)
+#endif
+
+template < int B_Y, int B_X, int imgsPerThread, int filtersPerThread, int cPixelCache >
+__global__ void conv2d_update_output
+(
+  float* images, float* filters, float* targets,
+  const int numImages, const int numImgColors, 
+  const int imgSizeY, const int imgSizeX, 
+  const int numFilters, const int filterSizeY, const int filterSizeX, 
+  const int numModulesY, const int numModulesX,
+  const int moduleStrideY, const int moduleStrideX
+) {
+
   const int imgPixels = imgSizeY * imgSizeX;
-  const int filterPixels = filterSize * filterSize;
+  const int filterPixels = filterSizeY * filterSizeX;
+  const int cPixels = numImgColors * filterPixels;
   const int numModules = numModulesX * numModulesY;
   const int numThreads = B_X * B_Y;
 
   const int filtersPerBlock = filtersPerThread * B_Y;
   const int imagesPerBlock = imgsPerThread * B_X;
-  const int blocksPerModule = DIVUP(numFilters, filtersPerBlock); // ceil !
-  const int shPixelsColors = pixelCache * colorCache;
+  const int blocksPerModule = numFilters / filtersPerBlock; // ceil !
 
-  __shared__ float shFilters[shPixelsColors][filtersPerBlock];
-  __shared__ float shImages[shPixelsColors][imagesPerBlock]; 
+  __shared__ float shFilters[filtersPerBlock][cPixelCache+1]; // +1, avoid bank conflict
+  __shared__ float shImages[imagesPerBlock][cPixelCache+1];
 
   const int moduleIdx = blockIdx.y / blocksPerModule;
   const int blockFilterIdx = filtersPerBlock * (blockIdx.y % blocksPerModule);
@@ -33,122 +47,77 @@ template < int B_Y, int B_X, int imgsPerThread, int filtersPerThread,
 
   const int tidx = threadIdx.y * B_X + threadIdx.x;
   
-  const int imgLoadModPosY = 
-    paddingStart + (moduleIdx / numModulesX) * moduleStride;
-  const int imgLoadModPosX = 
-    paddingStart + (moduleIdx % numModulesX) * moduleStride;
+  const int imgLoadModPosX = (moduleIdx % numModulesX) * moduleStrideX;
+  const int imgLoadModPosY = (moduleIdx / numModulesX) * moduleStrideY;
 
-  const int shLoadY = tidx / pixelCache; // which depth, which image
-  const int shLoadX = tidx % pixelCache; // which pixel
-  const int shLoads = numThreads/pixelCache; // how many per 'cycle'
+  const int shLoadX = tidx % cPixelCache;
+  const int shLoadY = tidx / cPixelCache;
+  const int shLoads = numThreads / cPixelCache;
 
-  images += blockImgIdx * numImgColors * imgPixels; // + shLoadX;  
-  filters += blockFilterIdx * numImgColors * filterPixels; //  + shLoadX;
-
+  images += blockImgIdx * numImgColors * imgPixels;
+  filters += blockFilterIdx * numImgColors * filterPixels;
   targets += moduleIdx + 
   	     (blockFilterIdx + threadIdx.y) * numModules +
     	     (blockImgIdx + threadIdx.x) * numModules * numFilters;
   
   // init
   float prod[filtersPerThread][imgsPerThread];
-#pragma unroll
-  for(int f = 0; f < filtersPerThread; f++) {
-#pragma unroll
-    for(int g = 0; g < imgsPerThread; g++) {
-      prod[f][g] = 0;
+  #pragma unroll
+  for(int d = 0; d < filtersPerThread; ++d) {
+    #pragma unroll
+    for(int z = 0; z < imgsPerThread; ++z) {
+      prod[d][z] = 0;
     }
   }
-
-  const int shFilters_sz = filtersPerBlock*shPixelsColors;
-  const int shFilters_inc = shFilters_sz/numThreads;
-  for (int sker = tidx; sker < shFilters_sz; sker += shFilters_inc) 
-    shFilters[sker%shPixelsColors][sker/shPixelsColors] = 0.0;
-
-  const int shImages_sz = imagesPerBlock*shPixelsColors;
-  const int shImages_inc = shImages_sz/numThreads;
-  for (int simg = tidx; simg < shImages_sz; simg += shImages_inc) 
-    shImages[simg%shPixelsColors][simg/shPixelsColors] = 0.0;
-  
   __syncthreads();
 
   // CONVOLUTION
-  for (int cc = 0; cc < numImgColors; cc += colorCache) {
-    for (int cp = 0; cp < filterPixels; cp += pixelCache) { 
+  for (int ccp = 0; ccp < cPixels; ccp += cPixelCache) {
+    const int cpx = ccp + shLoadX;
+    if (cpx < cPixels) {
       // load filters in bound
-      if ((cp + shLoadX) < filterPixels) {
-        // TODO generalize to non-square
-        float* ker = &filters[cc*filterPixels+cp+shLoadX];
-        for (int d = shLoadY; d < filtersPerBlock; d += shLoads) {
-  	  #pragma unroll
-	  for (int c = 0; c < colorCache; ++c) {
-            shFilters[c*B_Y+shLoadX][d] = 
-	    	ker[(d*numImgColors+c)*filterPixels];
-	  }
-        }
-      } else {
-        for (int d = shLoadY; d < filtersPerBlock; d += shLoads) {
-          #pragma unroll       
-          for (int c = 0; c < colorCache; ++c) {
-            shFilters[c*B_Y+shLoadX][d] = 0.0;
-          }
-        }
+      float* ker = &filters[cpx];
+      for (int d = shLoadY; d < filtersPerBlock; d += shLoads) {
+	shFilters[d][shLoadX] = ker[d*cPixels];
       }
-
       // load images in bound
-      const int x = imgLoadModPosX + (cp + shLoadX) % filterSize; 
-      const int y = imgLoadModPosY + (cp + shLoadX) / filterSize;
-      if (y >= 0 && y < imgSizeY && x >= 0 && x < imgSizeX) {
-        float* img = &images[cc*imgPixels+y*imgSizeX+x];
-        for (int z = shLoadY; z < imagesPerBlock; z += shLoads) {
-	  #pragma unroll
-	  for (int c = 0; c < colorCache; c++) {
-	    shImages[c*B_Y+shLoadX][z] = img[(z*numImgColors+c)*imgPixels];
-	  }
-	}
-      } else {
-/*
-        for (int z = shLoadY; z < imagesPerBlock; z += shImgLoads) {
-          #pragma unroll
-          for (int c = 0; c < colorCache; c++) {
-            shImages[z][c*B_Y+shLoadX] = 0.0;
-          }
-        }
-*/
+      const int c = cpx / filterPixels;
+      const int x = imgLoadModPosX + (cpx % filterPixels) % filterSizeX; 
+      const int y = imgLoadModPosY + (cpx % filterPixels) / filterSizeX;
+      float* img = &images[c*imgPixels+y*imgSizeX+x];
+      for (int z = shLoadY; z < imagesPerBlock; z += shLoads) {
+	shImages[z][shLoadX] = img[z*numImgColors*imgPixels];
       }
+    } else {
+      // assuming 'vx' mode
+      for (int d = shLoadY; d < filtersPerBlock; d += shLoads) {
+	shFilters[d][shLoadX] = 0.0;
+      }
+    }
+    __syncthreads();
 
-      __syncthreads();
-
-      // conv
-      #pragma unroll
-      for (int i = 0; i < pixelCache*colorCache; ++i) {
-	#pragma unroll
-	for (int f = 0; f < filtersPerThread; ++f) {
-	  #pragma unroll
-	  for (int g = 0; g < imgsPerThread; ++g) {
-	    // CLOCK HERE, NON SEQ ACCESS
-	    prod[f][g] += 
-	      shImages[i][g*B_X+threadIdx.x]*shFilters[i][f*B_Y+threadIdx.y];
-	  }
+    // conv
+#pragma unroll
+    for (int i = 0; i < cPixelCache; ++i) {
+#pragma unroll
+      for (int z = 0; z < imgsPerThread; ++z) {
+#pragma unroll
+        for (int d = 0; d < filtersPerThread; ++d) {
+	  prod[d][z] += shImages[z*B_X+threadIdx.x][i]*shFilters[d*B_Y+threadIdx.y][i];
 	}
       }
+    }
+    __syncthreads();
+  }
 
-      __syncthreads();
+#pragma unroll
+  for (int z = 0; z < imgsPerThread; ++z) {
+#pragma unroll
+    for (int d = 0; d < filtersPerThread; ++d) {
+      targets[z*B_X*numModules*numFilters+d*B_Y*numModules] = prod[d][z];
     }
   }
 
-  //#pragma unroll
-  for (int g = 0; g < imgsPerThread; g++) {
-    // checkImgBounds
-    if (blockImgIdx + threadIdx.x + g*B_X < numImages) { 
-      //#pragma unroll
-      for (int f = 0; f < filtersPerThread; f++) {
-        // checkTgtBounds
-	if (blockFilterIdx + threadIdx.y + f*B_Y < numFilters)
-	  /// SLOW WRITE OUT
-          targets[g*B_X*numModules*numFilters + f*B_Y*numModules] = prod[f][g];
-      }
-    }
-  }
 }
 
 
@@ -162,31 +131,133 @@ void spatialConvB_updateOutput
  int numImages, int numImgColors, int imgSizeY, int imgSizeX,
  // output dim:
  int numFilters, int numModulesY, int numModulesX, 
- // filter size:
- int filterSizeY, int filterSizeX,
- // input params:
- int paddingStart, int moduleStride
-)
+ // filter size and stride:
+ int filterSizeY, int filterSizeX, int moduleStrideY, int moduleStrideX
+) 
 {
-  assert(filterSizeX == filterSizeY);  // TODO SQUARE !
-  int filterSize = filterSizeX;
+  const int B_X = 16;
+  const int B_Y = 16; 
+  const int imgsPerThread = MIN(numImages/B_X, 8);
+  const int filtersPerThread = MIN(numFilters/B_Y, 8);
+  const int cPixelCache = 16;
 
   int numModules = numModulesX * numModulesY;
-
-  const int B_X = 32;
-  const int B_Y = 4; 
-  const int imgsPerThread = 4; 
-  const int filtersPerThread = 8; 
-  const int colorCache = 1;
-  const int pixelCache = 8; 
-
-  dim3 blocks = dim3(DIVUP(numImages, B_X*imgsPerThread), 
-       	      	     numModules * DIVUP(numFilters, B_Y * filtersPerThread));
+  dim3 blocks = dim3(numImages/(B_X*imgsPerThread),
+       	      	     numModules*(numFilters/(B_Y*filtersPerThread)));
   dim3 threads(B_X,B_Y);
 
-  cudaFuncSetCacheConfig(_filterActs_YxX_sparse< B_Y, B_X, imgsPerThread, filtersPerThread, colorCache, pixelCache, true >, cudaFuncCachePreferShared); 
-  _filterActs_YxX_sparse < B_Y, B_X, imgsPerThread, filtersPerThread, colorCache, pixelCache, true > <<<blocks, threads>>>
-    (input, kernel, output,
-     numImages, numFilters, imgSizeY, imgSizeX, filterSize, paddingStart, 
-     moduleStride, numModulesY, numModulesX, numImgColors);
+  if ((imgsPerThread == 1) && (filtersPerThread == 1)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 1, 1, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 1, 1, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 1) && (filtersPerThread == 2)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 1, 2, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 1, 2, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 1) && (filtersPerThread == 4)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 1, 4, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 1, 4, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 1) && (filtersPerThread == 8)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 1, 8, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 1, 8, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 2) && (filtersPerThread == 1)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 2, 1, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 2, 1, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 2) && (filtersPerThread == 2)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 2, 2, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 2, 2, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 2) && (filtersPerThread == 4)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 2, 4, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 2, 4, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 2) && (filtersPerThread == 8)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 2, 8, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 2, 8, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 4) && (filtersPerThread == 1)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 4, 1, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 4, 1, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 4) && (filtersPerThread == 2)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 4, 2, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 4, 2, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 4) && (filtersPerThread == 4)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 4, 4, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 4, 4, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 4) && (filtersPerThread == 8)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 4, 8, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 4, 8, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 8) && (filtersPerThread == 1)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 8, 1, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 8, 1, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 8) && (filtersPerThread == 2)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 8, 2, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 8, 2, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else if ((imgsPerThread == 8) && (filtersPerThread == 4)) {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 8, 4, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 8, 4, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  } else {
+    cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 8, 8, cPixelCache >, cudaFuncCachePreferShared);
+    conv2d_update_output < B_Y, B_X, 8, 8, cPixelCache > <<<blocks, threads>>>
+      (input, kernel, output,
+       numImages, numImgColors, imgSizeY, imgSizeX,
+       numFilters, filterSizeY, filterSizeX,
+       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+  }
+  
 }

@@ -1,9 +1,5 @@
 // TODO square, updateGradInput, accGradParameters, add bias
 
-#ifndef DIVUP
-#define DIVUP(x,y) (((x) + (y) - 1) / (y))
-#endif
-
 #include "SpatialConvolutionBatch/updateOutput.cu"
 ///#include "SpatialConvolutionBatch/updateGradInput.cu"
 ///#include "SpatialConvolutionBatch/accGradParameters.cu"
@@ -47,13 +43,12 @@ static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
   THCudaTensor_resize4d(output, batchSize, nOutputPlane, nOutputRows, nOutputCols);
   float *output_data = THCudaTensor_data(output);
 
-  // convolutions
+  // convolution
   spatialConvB_updateOutput(
     input_data, weight_data, output_data,
     batchSize, nInputPlane, nInputRows, nInputCols,
     nOutputPlane, nOutputRows, nOutputCols,
-    kH, kW,
-    0, dW
+    kH, kW, dH, dW
   );
 
   return 1;
@@ -62,8 +57,6 @@ static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
 static int cunn_SpatialConvolutionBatch_updateGradInput(lua_State *L) {
   return 1;
 }
-
-
 
 static int cunn_SpatialConvolutionBatch_accGradParameters(lua_State *L) {
   return 0;
