@@ -20,12 +20,12 @@
 template < int B_Y, int B_X, int imgsPerThread, int filtersPerThread, int cPixelCache >
 __global__ void conv2d_update_output
 (
-  float* images, float* filters, float* targets,
-  const int numImages, const int numImgColors, 
-  const int imgSizeY, const int imgSizeX, 
-  const int numFilters, const int filterSizeY, const int filterSizeX, 
-  const int numModulesY, const int numModulesX,
-  const int moduleStrideY, const int moduleStrideX
+ float* images, float* filters, float* targets,
+ const int numImages, const int numImgColors, 
+ const int imgSizeY, const int imgSizeX, 
+ const int numFilters, const int filterSizeY, const int filterSizeX, 
+ const int numModulesY, const int numModulesX,
+ const int moduleStrideY, const int moduleStrideX
 ) {
 
   const int imgPixels = imgSizeY * imgSizeX;
@@ -57,14 +57,14 @@ __global__ void conv2d_update_output
   images += blockImgIdx * numImgColors * imgPixels;
   filters += blockFilterIdx * numImgColors * filterPixels;
   targets += moduleIdx + 
-  	     (blockFilterIdx + threadIdx.y) * numModules +
-    	     (blockImgIdx + threadIdx.x) * numModules * numFilters;
+    (blockFilterIdx + threadIdx.y) * numModules +
+    (blockImgIdx + threadIdx.x) * numModules * numFilters;
   
   // init
   float prod[filtersPerThread][imgsPerThread];
-  #pragma unroll
+#pragma unroll
   for(int d = 0; d < filtersPerThread; ++d) {
-    #pragma unroll
+#pragma unroll
     for(int z = 0; z < imgsPerThread; ++z) {
       prod[d][z] = 0;
     }
@@ -251,13 +251,13 @@ void spatialConvB_updateOutput
        numImages, numImgColors, imgSizeY, imgSizeX,
        numFilters, filterSizeY, filterSizeX,
        numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  } else {
+  } else if ((imgsPerThread == 8) && (filtersPerThread == 8)) {
     cudaFuncSetCacheConfig( conv2d_update_output < B_Y, B_X, 8, 8, cPixelCache >, cudaFuncCachePreferShared);
     conv2d_update_output < B_Y, B_X, 8, 8, cPixelCache > <<<blocks, threads>>>
       (input, kernel, output,
        numImages, numImgColors, imgSizeY, imgSizeX,
        numFilters, filterSizeY, filterSizeX,
        numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  }
+  } else  { assert(0); }
   
 }

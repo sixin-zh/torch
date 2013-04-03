@@ -1,8 +1,8 @@
-// updateGradInput, accGradParameters, add bias
+// TODO interface, add bias (cf. SpatialConvolution, SpatialConvolutionCUDA)
 
 #include "SpatialConvolutionBatch/updateOutput.cu"
-///#include "SpatialConvolutionBatch/updateGradInput.cu"
-///#include "SpatialConvolutionBatch/accGradParameters.cu"
+#include "SpatialConvolutionBatch/updateGradInput.cu"
+#include "SpatialConvolutionBatch/accGradParameters.cu"
 
 static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
 
