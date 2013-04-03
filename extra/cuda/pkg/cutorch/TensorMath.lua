@@ -193,6 +193,12 @@ interface:wrap("add",
                 {name="float", default=1},
                 {name="CudaTensor"}})
 
+interface:wrap("shrink",
+	       cname("shrink"),
+	       {{name="CudaTensor", returned=true},
+		{name="float"},
+		{name="float"}})
+
 interface:wrap("mul",
                cname("mul"),
                {{name="CudaTensor", returned=true},

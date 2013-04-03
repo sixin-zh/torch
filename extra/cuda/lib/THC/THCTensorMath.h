@@ -55,4 +55,6 @@ TH_API float THCudaTensor_dist(THCudaTensor *self, THCudaTensor *src, float valu
 TH_API void THCudaTensor_rand(THCudaTensor *r_, THLongStorage *size);
 TH_API void THCudaTensor_randn(THCudaTensor *r_, THLongStorage *size);
 
+TH_API void THCudaTensor_shrink(THCudaTensor *self, float a, float v);
+
 #endif

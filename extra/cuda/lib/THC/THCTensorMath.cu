@@ -51,6 +51,32 @@ void THCudaTensor_add(THCudaTensor *self_, float value)
   }
 }
 
+
+struct shrinkvalue_functor {
+  const float t;
+  const float v;
+  shrinkvalue_functor(float t_, float v_) : t(t_), v(v_) {}
+
+  __host__ __device__ float operator()(const float& x) const {
+    return (x<t?v:x);
+  }
+};
+
+void THCudaTensor_shrink(THCudaTensor *self_, float t, float v) {
+  {
+    THCudaTensor *self = THCudaTensor_newContiguous(self_);
+    long size = THCudaTensor_nElement(self);
+    thrust::device_ptr<float> self_data(THCudaTensor_data(self));
+
+    thrust::transform(self_data, self_data+size, self_data, 
+		      shrinkvalue_functor(t,v));
+
+    THCudaTensor_freeCopyTo(self, self_);    
+  }
+}
+
+
+
 void THCudaTensor_mul(THCudaTensor *self_, float value)
 {
   THCudaTensor *self = THCudaTensor_newContiguous(self_);

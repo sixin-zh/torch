@@ -106,6 +106,8 @@ TH_API void THTensor_(logspace)(THTensor *r_, real a, real b, long n);
 TH_API void THTensor_(rand)(THTensor *r_, THLongStorage *size);
 TH_API void THTensor_(randn)(THTensor *r_, THLongStorage *size);
 
+TH_API void THTensor_(shrink)(THTensor *r_, real t, real v);		    
+
 #endif
 
 #endif
