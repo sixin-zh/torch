@@ -14,12 +14,12 @@ function ClassNLLCriterion:updateOutput(input, target)
    elseif input:dim() == 2 then
       local output = torch.Tensor(1):typeAs(input)
       for i=1,target:size(1) do
-         output = output - input[i][{{target[i]}}]
+         output:add(-1,input[i][{{target[i]}}])
       end
       if self.sizeAverage then
          output = output:div(target:size(1))
       end
-      self.output = output:typeAs('FloatTensor')
+      self.output = output[1]
    else
       error('matrix or vector expected')
    end
