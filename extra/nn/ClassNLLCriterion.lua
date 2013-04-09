@@ -6,26 +6,33 @@ function ClassNLLCriterion:__init()
 end
 
 function ClassNLLCriterion:updateOutput(input, target)
+--   input.nn.ClassNLLCriterion_updateOutput(self, input, target)
+--   return self.output
+
    if input:dim() == 1 then
       self.output = -input[target]
    elseif input:dim() == 2 then
-      local output = 0
+      local output = torch.Tensor(1):typeAs(input)
       for i=1,target:size(1) do
-         output = output - input[i][target[i]]
+         output = output - input[i][{{target[i]}}]
       end
       if self.sizeAverage then
-         output = output / target:size(1)
+         output = output:div(target:size(1))
       end
-      self.output = output
+      self.output = output:typeAs('FloatTensor')
    else
       error('matrix or vector expected')
    end
    return self.output
+
 end
 
 function ClassNLLCriterion:updateGradInput(input, target)
    self.gradInput:resizeAs(input)
    self.gradInput:zero()
+
+--   input.nn.ClassNLLCriterion_updateGradInput(self, input, target)
+--   return self.gradInput
 
   if input:dim() == 1 then
       self.gradInput[target] = -1
@@ -40,5 +47,6 @@ function ClassNLLCriterion:updateGradInput(input, target)
       end
    end
 
-   return self.gradInput
+   return self.gradInput   
+
 end
