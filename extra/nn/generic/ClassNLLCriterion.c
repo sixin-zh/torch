@@ -8,22 +8,23 @@ static int nn_(ClassNLLCriterion_updateOutput)(lua_State *L) {
   input = THTensor_(newContiguous)(input);
   real *input_data = THTensor_(data)(input);
 
+  THTensor *target = luaT_checkudata(L, 3, torch_Tensor);
+  target = THTensor_(newContiguous)(target);
+  real *target_data = THTensor_(data)(target);
+
   accreal sum = .0;
   if(input->nDimension == 1) {
-    // ndim = input->size[0]; // TODO check bound of target_data?
-    int target_data = luaT_checkudata(L, 3, "int");
-    sum -= input_data[target_data];
+    target = THTensor_(newContiguous)(target);
+    real *target_data = THTensor_(data)(target);
+    sum -= input_data[(long)target_data[0]-1];
   }
   else if(input->nDimension == 2) {
-    int nframe = input->size[0]; // TODO long?
-    int ndim = input->size[1];
-    int sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
-    THTensor *target = luaT_checkudata(L, 3, torch_Tensor);
-    target = THTensor_(newContiguous)(target);
-    int *target_data = THTensor_(data)(target);
-    int f; // TODO long?
+    long nframe = input->size[0];
+    long ndim = input->size[1];
+    long sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
+    long f;
     for (f = 0; f < nframe; ++f) {
-      sum -= input_data[f*ndim+target_data[f]];
+      sum -= input_data[f*ndim+(long)target_data[f]-1];
     }
     if (sizeAverage) sum /= nframe;
     THTensor_(free)(target);
@@ -35,7 +36,7 @@ static int nn_(ClassNLLCriterion_updateOutput)(lua_State *L) {
   lua_setfield(L, 1, "output");
 
   THTensor_(free)(input);
- 
+  
   return 1;
 }
 
@@ -48,31 +49,31 @@ static int nn_(ClassNLLCriterion_updateGradInput)(lua_State *L) {
   input = THTensor_(newContiguous)(input);
   real *input_data = THTensor_(data)(input);
 
+  THTensor *target = luaT_checkudata(L, 3, torch_Tensor);
+  target = THTensor_(newContiguous)(target);
+  real *target_data = THTensor_(data)(target);
+
   accreal grad = -1.0;
   if(input->nDimension == 1) {
-    int target_data = luaT_checkudata(L, 3, "int");
-    grad_data[target_data] = grad;
+    grad_data[(long)target_data[0]-1] = grad;
   }
   else if(input->nDimension == 2) {
-    int nframe = input->size[0];
-    int ndim = input->size[1];
-    int sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
+    long nframe = input->size[0];
+    long ndim = input->size[1];
+    long sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
     if (sizeAverage) grad /= nframe;
-    THTensor *target = luaT_checkudata(L, 3, torch_Tensor);
-    target = THTensor_(newContiguous)(target);
-    int *target_data = THTensor_(data)(target);
-    int f; // TODO long?
+    long f;
     for (f = 0; f < nframe; ++f) {
-      grad_data[f*ndim+target_data[f]] = grad;
+      grad_data[f*ndim+(long)target_data[f]-1] = grad;
     }
     THTensor_(free)(target);
   }
   else
     THArgCheck(0, 2, "vector or matrix expected");
-
+  
   THTensor_(free)(input);
   THTensor_(free)(gradInput);
-
+  
   return 1;
 }
 

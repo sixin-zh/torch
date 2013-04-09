@@ -121,6 +121,7 @@ DLL_EXPORT int luaopen_libnn(lua_State *L)
   nn_FloatHardTanh_init(L);
   nn_FloatLogSoftMax_init(L);
   nn_FloatMSECriterion_init(L);
+  nn_FloatClassNLLCriterion_init(L);
   nn_FloatAbsCriterion_init(L);
   nn_FloatLogSigmoid_init(L);
   nn_FloatSigmoid_init(L);
@@ -155,6 +156,7 @@ DLL_EXPORT int luaopen_libnn(lua_State *L)
   nn_DoubleHardTanh_init(L);
   nn_DoubleLogSoftMax_init(L);
   nn_DoubleMSECriterion_init(L);
+  nn_DoubleClassNLLCriterion_init(L);
   nn_DoubleAbsCriterion_init(L);
   nn_DoubleLogSigmoid_init(L);
   nn_DoubleSigmoid_init(L);
