@@ -11,13 +11,13 @@
 #include "Tanh.cu"
 #include "LogSoftMax.cu"
 #include "TemporalConvolution.cu"
-#include "SpatialConvolution.cu"
-#include "SpatialConvolutionBatch.cu"
-#include "SpatialConvolutionMap.cu"
-#include "SpatialConvolutionCUDA.cu"
-#include "SpatialSubSampling.cu"
-#include "SpatialMaxPooling.cu"
-#include "SpatialMaxPoolingCUDA.cu"
+/* #include "SpatialConvolution.cu" */
+/* #include "SpatialConvolutionBatch.cu" */
+/* #include "SpatialConvolutionMap.cu" */
+/* #include "SpatialConvolutionCUDA.cu" */
+/* #include "SpatialSubSampling.cu" */
+/* #include "SpatialMaxPooling.cu" */
+/* #include "SpatialMaxPoolingCUDA.cu" */
 #include "Square.cu"
 #include "Sqrt.cu"
 #include "MultiMarginCriterion.cu"
@@ -35,13 +35,13 @@ DLL_EXPORT TH_API int luaopen_libcunn(lua_State *L)
   cunn_HardTanh_init(L);
   cunn_LogSoftMax_init(L);
   cunn_TemporalConvolution_init(L);
-  cunn_SpatialConvolution_init(L);
-  cunn_SpatialConvolutionBatch_init(L);
-  cunn_SpatialConvolutionCUDA_init(L);
-  cunn_SpatialConvolutionMap_init(L);
-  cunn_SpatialMaxPooling_init(L);
-  cunn_SpatialMaxPoolingCUDA_init(L);
-  cunn_SpatialSubSampling_init(L);
+  /* cunn_SpatialConvolution_init(L); */
+  /* cunn_SpatialConvolutionBatch_init(L); */
+  /* cunn_SpatialConvolutionCUDA_init(L); */
+  /* cunn_SpatialConvolutionMap_init(L); */
+  /* cunn_SpatialMaxPooling_init(L); */
+  /* cunn_SpatialMaxPoolingCUDA_init(L); */
+  /* cunn_SpatialSubSampling_init(L); */
   cunn_MultiMarginCriterion_init(L);
   cunn_Square_init(L);
   cunn_Sqrt_init(L);

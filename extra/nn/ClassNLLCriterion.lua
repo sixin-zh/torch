@@ -3,6 +3,7 @@ local ClassNLLCriterion, parent = torch.class('nn.ClassNLLCriterion', 'nn.Criter
 function ClassNLLCriterion:__init()
    parent.__init(self)
    self.sizeAverage = true
+   self.output = 0
 end
 
 function ClassNLLCriterion:updateOutput(input, target)
