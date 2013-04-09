@@ -45,7 +45,7 @@ static int nn_(ClassNLLCriterion_updateGradInput)(lua_State *L) {
 
   THTensor *input = luaT_checkudata(L, 2, torch_Tensor);  
   input = THTensor_(newContiguous)(input);
-  real *input_data = THTensor_(data)(input);
+  // real *input_data = THTensor_(data)(input);
 
   THTensor *target = luaT_checkudata(L, 3, torch_Tensor);
   target = THTensor_(newContiguous)(target);

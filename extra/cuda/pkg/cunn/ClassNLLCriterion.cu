@@ -23,6 +23,17 @@ float* output, float *input, float *target, int nframe, int ndim, int sizeAverag
   }
 }
 
+__global__ void 
+cunn_ClassNLLCriterion_updateGradInput_kernel
+(
+float* gradInput, float *target, int nframe, int ndim, float grad
+) { 
+  register int i;
+  for (i = threadIdx.x; i < nframe; i += NTHREADS) {
+    gradInput[i*ndim+(int)target[i]-1] = grad;
+  }
+}
+
 static int cunn_ClassNLLCriterion_updateOutput(lua_State *L) {
   THCudaTensor *input = (THCudaTensor*)luaT_checkudata(L, 2, "torch.CudaTensor");
   input = THCudaTensor_newContiguous(input);
@@ -42,7 +53,7 @@ static int cunn_ClassNLLCriterion_updateOutput(lua_State *L) {
   else if(input->nDimension == 2) {
     dim3 blocks(1);
     dim3 threads(NTHREADS);     
-    long sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
+    int sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
     cunn_ClassNLLCriterion_updateOutput_kernel<<<blocks,threads>>>
       (output->data, input_data, target_data, input->size[0], input->size[1], sizeAverage);
   }
@@ -54,9 +65,7 @@ static int cunn_ClassNLLCriterion_updateOutput(lua_State *L) {
     THError(cudaGetErrorString(errcode));
 
   lua_pushnumber(L, -THCudaStorage_get(output, 0));
-  lua_pushstring(L, "output");
-  lua_pushvalue(L, -2);
-  lua_rawset(L, 1);
+  lua_setfield(L, 1, "output");
 
   THCudaStorage_free(output);
   THCudaTensor_free(target);
@@ -67,7 +76,45 @@ static int cunn_ClassNLLCriterion_updateOutput(lua_State *L) {
 
 static int cunn_ClassNLLCriterion_updateGradInput(lua_State *L) {
   
+  THCudaTensor *input = (THCudaTensor*)luaT_checkudata(L, 2, "torch.CudaTensor");
+  input = THCudaTensor_newContiguous(input);
+  // float *input_data = THCudaTensor_data(input);
+  
+  THCudaTensor *target = (THCudaTensor*)luaT_checkudata(L, 3, "torch.CudaTensor");
+  target = THCudaTensor_newContiguous(target);
+  float *target_data = THCudaTensor_data(target);
 
+  THCudaTensor *gradInput = (THCudaTensor*)luaT_getfieldcheckudata(L, 1, "gradInput", "torch.CudaTensor");
+  gradInput = THCudaTensor_newContiguous(gradInput);
+  float *gradInput_data = THCudaTensor_data(gradInput);
+
+  float grad = -1.0;
+  if (input->nDimension == 1) {
+    float tid;
+    cudaMemcpy(&tid, target_data, sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(gradInput_data+(int)tid-1, &grad, sizeof(float), cudaMemcpyHostToDevice);
+  }
+  else if(input->nDimension == 2) {
+    int nframe = input->size[0];
+    int ndim = input->size[1];
+    int sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
+    if (sizeAverage) grad /= nframe;
+    dim3 blocks(1);
+    dim3 threads(NTHREADS);
+    cunn_ClassNLLCriterion_updateGradInput_kernel<<<blocks,threads>>>
+      (gradInput_data, target_data, nframe, ndim, grad);
+  }
+  else
+    THArgCheck(0, 2, "vector or matrix expected");  
+
+  cudaError errcode = cudaGetLastError();
+  if(errcode != cudaSuccess)
+    THError(cudaGetErrorString(errcode));
+
+  THTensor_(free)(gradInput);
+  THTensor_(free)(target);
+  THTensor_(free)(input);
+  
   return 1;
 }
 
