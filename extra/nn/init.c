@@ -104,6 +104,9 @@
 #include "generic/L1Cost.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/ClassNLLCriterion.c"
+#include "THGenerateFloatTypes.h"
+
 DLL_EXPORT int luaopen_libnn(lua_State *L)
 {
   lua_newtable(L);
