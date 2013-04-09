@@ -111,9 +111,9 @@ static int cunn_ClassNLLCriterion_updateGradInput(lua_State *L) {
   if(errcode != cudaSuccess)
     THError(cudaGetErrorString(errcode));
 
-  THTensor_(free)(gradInput);
-  THTensor_(free)(target);
-  THTensor_(free)(input);
+  THCudaTensor_free(gradInput);
+  THCudaTensor_free(target);
+  THCudaTensor_free(input);
   
   return 1;
 }
