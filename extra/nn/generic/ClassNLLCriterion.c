@@ -14,20 +14,17 @@ static int nn_(ClassNLLCriterion_updateOutput)(lua_State *L) {
 
   accreal sum = .0;
   if(input->nDimension == 1) {
-    target = THTensor_(newContiguous)(target);
-    real *target_data = THTensor_(data)(target);
-    sum -= input_data[(long)target_data[0]-1];
+    sum = -input_data[(int)target_data[0]-1];
   }
   else if(input->nDimension == 2) {
-    long nframe = input->size[0];
-    long ndim = input->size[1];
-    long sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
-    long f;
+    int nframe = input->size[0];
+    int ndim = input->size[1];
+    int sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
+    int f;
     for (f = 0; f < nframe; ++f) {
-      sum -= input_data[f*ndim+(long)target_data[f]-1];
+      sum -= input_data[f*ndim+(int)target_data[f]-1];
     }
     if (sizeAverage) sum /= nframe;
-    THTensor_(free)(target);
   }
   else
     THArgCheck(0, 2, "vector or matrix expected");
@@ -35,6 +32,7 @@ static int nn_(ClassNLLCriterion_updateOutput)(lua_State *L) {
   lua_pushnumber(L, sum);
   lua_setfield(L, 1, "output");
 
+  THTensor_(free)(target);
   THTensor_(free)(input);
   
   return 1;
@@ -55,22 +53,22 @@ static int nn_(ClassNLLCriterion_updateGradInput)(lua_State *L) {
 
   accreal grad = -1.0;
   if(input->nDimension == 1) {
-    grad_data[(long)target_data[0]-1] = grad;
+    grad_data[(int)target_data[0]-1] = grad;
   }
   else if(input->nDimension == 2) {
-    long nframe = input->size[0];
-    long ndim = input->size[1];
-    long sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
+    int nframe = input->size[0];
+    int ndim = input->size[1];
+    int sizeAverage = luaT_getfieldcheckboolean(L, 1, "sizeAverage");
     if (sizeAverage) grad /= nframe;
-    long f;
+    int f;
     for (f = 0; f < nframe; ++f) {
-      grad_data[f*ndim+(long)target_data[f]-1] = grad;
+      grad_data[f*ndim+(int)target_data[f]-1] = grad;
     }
-    THTensor_(free)(target);
   }
   else
     THArgCheck(0, 2, "vector or matrix expected");
   
+  THTensor_(free)(target);
   THTensor_(free)(input);
   THTensor_(free)(gradInput);
   

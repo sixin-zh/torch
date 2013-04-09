@@ -22,6 +22,7 @@
 #include "Sqrt.cu"
 #include "MultiMarginCriterion.cu"
 #include "MSECriterion.cu"
+#include "ClassNLLCriterion.cu"
 #include "Threshold.cu"
 #include "Sigmoid.cu"
 
@@ -46,6 +47,7 @@ DLL_EXPORT TH_API int luaopen_libcunn(lua_State *L)
   cunn_Sqrt_init(L);
   cunn_Threshold_init(L);
   cunn_MSECriterion_init(L);
+  cunn_ClassNLLCriterion_init(L);
 
   return 1;
 }
