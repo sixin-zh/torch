@@ -1103,6 +1103,14 @@ accreal THTensor_(stdall)(THTensor *tensor)
   return sqrt(THTensor_(varall)(tensor));
 } 
 
+// r<a => r=v
+void THTensor_(shrink)(THTensor *r_, real a, real v) {
+  TH_TENSOR_APPLY
+    (real, r_, 
+     if (*r__data < a) *r__data = v;
+     );
+}
+
 void THTensor_(linspace)(THTensor *r_, real a, real b, long n)
 {
   real i = 0;

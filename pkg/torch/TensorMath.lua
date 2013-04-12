@@ -304,7 +304,13 @@ for _,Tensor in ipairs({"ByteTensor", "CharTensor",
         {{name=Tensor},
          {name=Tensor},
          {name=accreal, creturned=true}})
-   
+
+   wrap("shrink",
+	cname("shrink"),
+        {{name=Tensor, returned=true},
+         {name=accreal},
+         {name=accreal}})
+
    wrap("add",
         cname("add"),
         {{name=Tensor, default=true, returned=true, method={default='nil'}},
