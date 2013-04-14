@@ -43,20 +43,19 @@ static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
   float *weight_data = THCudaTensor_data(weight);
   float *output_data = THCudaTensor_data(output);
 
-  /* add bias first */
-  long k,p;
-  THCudaTensor *outputPlane = THCudaTensor_new();
-  THCudaTensor *outputBatch = THCudaTensor_new();
-  for(p=0; p<input->size[0]; p++) {
-    THCudaTensor_select(outputBatch, output, 0, p);
-    for(k=0; k<nOutputPlane; k++) {
-      THCudaTensor_select(outputPlane, outputBatch, 0, k);
-      THCudaTensor_fill(outputPlane, THCudaTensor_get1d(bias, k));
-    }
-  }
-  THCudaTensor_free(outputPlane);
-  THCudaTensor_free(outputBatch);
-
+  /* /\* add bias first *\/ */
+  /* long k,p; */
+  /* THCudaTensor *outputPlane = THCudaTensor_new(); */
+  /* THCudaTensor *outputBatch = THCudaTensor_new(); */
+  /* for(p=0; p<input->size[0]; p++) { */
+  /*   THCudaTensor_select(outputBatch, output, 0, p); */
+  /*   for(k=0; k<nOutputPlane; k++) { */
+  /*     THCudaTensor_select(outputPlane, outputBatch, 0, k); */
+  /*     THCudaTensor_fill(outputPlane, THCudaTensor_get1d(bias, k)); */
+  /*   } */
+  /* } */
+  /* THCudaTensor_free(outputPlane); */
+  /* THCudaTensor_free(outputBatch); */
 
   // convolution
   spatialConvB_updateOutput(
