@@ -5,6 +5,54 @@
 #include "SpatialConvolutionBatch/updateGradInput.cu"
 #include "SpatialConvolutionBatch/accGradParameters.cu"
 
+// blockIdx.x  -> d
+// threadIdx.x -> (m,n) [+blockDim.x]
+// threadIdx.y -> z [+blockDim.y]
+__global__ void _add_bias(float *bias, float *output,
+			  int batch_n, int output_n, 
+			  int output_h, int output_w) {
+  output += blockIdx.x*output_h*output_w;
+  float b = bias[blockIdx.x];
+  int oz,oxy;
+  for (oz = threadIdx.y; oz < batch_n; oz += blockDim.y) {
+    float *out = output + oz*output_n*output_h*output_w;
+    for (oxy = threadIdx.x; oxy < output_h*output_w; oxy += blockDim.x) {
+      out[oxy] += b;
+    }
+  }
+}
+
+__global__ void _compute_gradBias(float *gradBias, float *gradOutput, float scale,
+                                 int output_n, int output_h, int output_w)
+{
+  // each block does a plane
+  int k = blockIdx.x;
+  float *gradOutput_k = gradOutput + (k + threadIdx.y*output_n)*output_h*output_w;
+
+  // offsets
+  int i_start = threadIdx.x;
+  int i_end = output_w*output_h;
+  int i_step = blockDim.x;
+
+  int tid = threadIdx.x + threadIdx.y * blockDim.x;
+  int nthreads = blockDim.x * blockDim.y;
+
+  // sum output plane k into partial sum array
+  __shared__ float sums[512];
+  sums[tid] = 0;
+  for (int i=i_start; i<i_end; i+=i_step) {
+    sums[tid] += gradOutput_k[i];
+  }
+  __syncthreads();
+
+  // reduce
+  if (tid == 0) {
+    for (int i=0; i<nthreads; i++)
+      gradBias[k] += scale*sums[i];
+  }
+}
+
+
 static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
 
   int kW = luaT_getfieldcheckint(L, 1, "kW");
@@ -41,22 +89,15 @@ static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
   // raw pointers 
   float *input_data = THCudaTensor_data(input);
   float *weight_data = THCudaTensor_data(weight);
+  float *bias_data = THCudaTensor_data(bias);
   float *output_data = THCudaTensor_data(output);
-
-  /* add bias first */
-  long k,p;
-  THCudaTensor *outputPlane = THCudaTensor_new();
-  THCudaTensor *outputBatch = THCudaTensor_new();
-  for(p=0; p<input->size[0]; p++) {
-    THCudaTensor_select(outputBatch, output, 0, p);
-    for(k=0; k<nOutputPlane; k++) {
-      THCudaTensor_select(outputPlane, outputBatch, 0, k);
-      THCudaTensor_fill(outputPlane, THCudaTensor_get1d(bias, k));
-    }
-  }
-  THCudaTensor_free(outputPlane);
-  THCudaTensor_free(outputBatch);
-
+  
+  // add bias to 
+  dim3 blocks(nOutputPlane);
+  dim3 threads(32,4);
+  _add_bias <<<blocks,threads>>> 
+    (bias_data, output_data, 
+     batchSize, nOutputPlane, nOutputRows, nOutputCols);
 
   // convolution
   spatialConvB_updateOutput(
@@ -118,36 +159,6 @@ static int cunn_SpatialConvolutionBatch_updateGradInput(lua_State *L) {
   return 1;
 }
 
-__global__ void _compute_gradBias(float *gradBias, float *gradOutput, float scale,
-                                 int output_n, int output_h, int output_w)
-{
-  // each block does a plane
-  int k = blockIdx.x;
-  float *gradOutput_k = gradOutput + (k + threadIdx.y*output_n)*output_h*output_w;
-
-  // offsets
-  int i_start = threadIdx.x;
-  int i_end = output_w*output_h;
-  int i_step = blockDim.x;
-
-  int tid = threadIdx.x + threadIdx.y * blockDim.x;
-  int nthreads = blockDim.x * blockDim.y;
-
-  // sum output plane k into partial sum array
-  __shared__ float sums[512];
-  sums[tid] = 0;
-  for (int i=i_start; i<i_end; i+=i_step) {
-    sums[tid] += gradOutput_k[i];
-  }
-  __syncthreads();
-
-  // reduce
-  if (tid == 0) {
-    for (int i=0; i<nthreads; i++)
-      gradBias[k] += scale*sums[i];
-  }
-}
-
 static int cunn_SpatialConvolutionBatch_accGradParameters(lua_State *L) {
 
   int kW = luaT_getfieldcheckint(L, 1, "kW");
@@ -192,8 +203,9 @@ static int cunn_SpatialConvolutionBatch_accGradParameters(lua_State *L) {
     int cst = 16;
     if ((cst+sl) > gradOutput->size[0]) cst = gradOutput->size[0] - sl;
     dim3 threads(16, cst);
-    _compute_gradBias <<<blocks, threads>>> (gradBias_data, gradOutput_data + sl*gradOutput->stride[0], scale,
-					    nOutputPlane, nOutputRows, nOutputCols);
+    _compute_gradBias <<<blocks, threads>>> 
+      (gradBias_data, gradOutput_data + sl*gradOutput->stride[0], scale,
+       nOutputPlane, nOutputRows, nOutputCols);
   }
 
   /* gradient to kernel */
