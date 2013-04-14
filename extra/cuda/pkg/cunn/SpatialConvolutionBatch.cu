@@ -28,11 +28,11 @@ __global__ void _add_bias(float *bias, float *output,
 // blockIdx.x  -> d
 // threadIdx.x -> (m,n) [+blockDim.x]
 // threadIdx.y -> z [+blockDim.y]
-__global__ void _add_gradBias(float *gradBias, float *gradOutput, float scale,
+__global__ void _fill_gradBias(float *gradBias, float *gradOutput, float scale,
 			      int batch_n, int output_n,
 			      int output_h, int output_w) {
   gradOutput += blockIdx.x*output_h*output_w;
-  __shared__ shGrad[128]; // 32*4
+  __shared__ float shGrad[128]; // 32*4
   float g = .0f;
   int oz,oxy;
   for (oz = threadIdx.y; oz < batch_n; oz += 4) {
@@ -49,7 +49,7 @@ __global__ void _add_gradBias(float *gradBias, float *gradOutput, float scale,
     g = .0f;
     for (oxy = 0; oxy < 128; ++oxy)
       g += shGrad[oxy];
-    gradBias[blockIdx.x] += scale*g;
+    gradBias[blockIdx.x] = scale*g;
   }
 }
 
@@ -207,7 +207,7 @@ static int cunn_SpatialConvolutionBatch_accGradParameters(lua_State *L) {
   // add gradBias
   dim3 blocks(nOutputPlane);
   dim3 threads(32,4);
-  __add_gradBias <<<blocks,threads>>> 
+  _fill_gradBias <<<blocks,threads>>>
     (gradBias_data, gradOutput_data, scale,
      batchSize, nOutputPlane, nOutputRows, nOutputCols);
 
