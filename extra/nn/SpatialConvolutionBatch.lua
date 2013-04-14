@@ -14,7 +14,7 @@ function SpatialConvolutionBatch:__init(nInputPlane, nOutputPlane, kW, kH, dW, d
    self.dH = dH
 
    self.weight = torch.Tensor(nOutputPlane, nInputPlane, kH, kW)
-   self.bias = torch.Tensor(nOutputPlane) -- TODO
+   self.bias = torch.Tensor(nOutputPlane)
    self.gradWeight = torch.Tensor(nOutputPlane, nInputPlane, kH, kW)
    self.gradBias = torch.Tensor(nOutputPlane)
    
@@ -41,17 +41,17 @@ function SpatialConvolutionBatch:reset(stdv)
 end
 
 function SpatialConvolutionBatch:updateOutput(input)
-   return input.nn.SpatialConvolutionBatch_updateOutput(self, input)
+   input.nn.SpatialConvolutionBatch_updateOutput(self, input)
+   return self.output
 end
 
 function SpatialConvolutionBatch:updateGradInput(input, gradOutput)
-   if self.gradInput then
-      return input.nn.SpatialConvolutionBatch_updateGradInput(self, input, gradOutput)
-   end
+   input.nn.SpatialConvolutionBatch_updateGradInput(self, input, gradOutput)
+   return self.gradInput
 end
 
 function SpatialConvolutionBatch:accGradParameters(input, gradOutput, scale)
-   return input.nn.SpatialConvolutionBatch_accGradParameters(self, input, gradOutput, scale)
+   input.nn.SpatialConvolutionBatch_accGradParameters(self, input, gradOutput, scale)
 end
 
 -- this routine copies weight+bias from a regular SpatialConvolution module

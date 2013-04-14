@@ -1,5 +1,7 @@
 // 2D Convolution kernel - 'vx' mode 
-// assume numFilters % 16 == 0, TODO AVOID COLOR CHECK
+// default: B_Y = B_X = zKernelCache = 16
+//          numFilters % 16 == 0
+// the code is optimized for Tesla K20Xm
 // Author: Sixin Zhang (zsx@cims.nyu.edu)
 
 #ifndef DIVUP
@@ -14,7 +16,7 @@
 #define MAX(a,b) (a) > (b) ? (a) : (b)
 #endif
 
-template < int B_Y, int B_X, int filtersPerThread, int colorsPerThread, int zKernelCache >
+template < int B_Y, int B_X, int filtersPerThread, int colorsPerThread, int zKernelCache, int noColorCheck >
   __global__ void conv2d_acc_gradFilters
 (
  float *images, float *gradOutputs, float *gradFilters,
@@ -83,18 +85,18 @@ template < int B_Y, int B_X, int filtersPerThread, int colorsPerThread, int zKer
 	  (nm % numModulesX) * moduleStrideX +
 	  (nm / numModulesX) * moduleStrideY * imgSizeX;
 	for (int c = shLoadY; c < colorsPerBlock; c += shLoads) {
-	  if (c + blockColorIdx  < numImgColors) // COLOR_CHECK
+	  if ((noColorCheck) || (c + blockColorIdx < numImgColors))
 	    shImages[c][shLoadX] = img[c*imgPixels+yx];
 	  else
 	    shImages[c][shLoadX] = 0.0;
 	}
       } else {
 	for (int d = shLoadY; d < filtersPerBlock; d += shLoads) {
-	  shGradOuts[d][shLoadX] = 0.0;
+	    shGradOuts[d][shLoadX] = 0.0;
 	}
       }
       __syncthreads();
-      
+
       // conv
 #pragma unroll
       for (int i = 0; i < zKernelCache; ++i) {
@@ -111,15 +113,14 @@ template < int B_Y, int B_X, int filtersPerThread, int colorsPerThread, int zKer
 
   }
 
-  //#pragma unroll
+#pragma unroll
   for (int c = 0; c < colorsPerThread; ++c) {
-    if (blockColorIdx + c*B_Y + threadIdx.y < numImgColors) // COLOR_CHECK
+    if ((noColorCheck) || (blockColorIdx + c*B_Y + threadIdx.y < numImgColors))
 #pragma unroll
       for (int d = 0; d < filtersPerThread; ++d) {
 	gradFilters[(d*B_X*numImgColors+c*B_Y)*filterPixels] = prod[c][d];
       }
   }
-
 }
 
 void spatialConvB_accGradParameters
@@ -132,85 +133,155 @@ void spatialConvB_accGradParameters
  int numFilters, int numModulesY, int numModulesX, 
  // filter size and stride:
  int filterSizeY, int filterSizeX, int moduleStrideY, int moduleStrideX
- ) {
-
+) {
 
   assert((numFilters > 0) && (numFilters % 16 == 0));
 
-  const int B_X = 16;
-  const int B_Y = 16;
-  const int filtersPerThread = MIN(numFilters/B_X, 4);
+  const int B_X = 32;
+  const int B_Y = 4;
+  const int filtersPerThread = MIN(numFilters/B_X, 8);
   const int colorsPerThread = MIN(DIVUP(numImgColors,B_Y),4);
   const int zKernelCache = 16;
-  
+  const int nocolorCheck = (numImgColors % B_Y == 0);
+
+  assert(numFilters % (B_Y*filtersPerThread) == 0);
+
   dim3 blocks = dim3(numFilters/(B_X*filtersPerThread),
                      filterSizeY*filterSizeX*(DIVUP(numImgColors,B_Y*colorsPerThread)));
   dim3 threads(B_X,B_Y);
   
-  if ((colorsPerThread == 1) && (filtersPerThread == 1)) {
-    cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 1, 1, zKernelCache >, cudaFuncCachePreferShared);
-    conv2d_acc_gradFilters < B_Y, B_X, 1, 1, zKernelCache > <<<blocks, threads>>>
-      (inputs, gradOutputs, gradFilters,
-       numImages, numImgColors, imgSizeY, imgSizeX,
-       numFilters, filterSizeY, filterSizeX,
-       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  } else if ((colorsPerThread == 1) && (filtersPerThread == 2)) {
-    cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 2, 1, zKernelCache >, cudaFuncCachePreferShared);
-    conv2d_acc_gradFilters < B_Y, B_X, 2, 1, zKernelCache > <<<blocks, threads>>>
-      (inputs, gradOutputs, gradFilters,
-       numImages, numImgColors, imgSizeY, imgSizeX,
-       numFilters, filterSizeY, filterSizeX,
-       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  } else if ((colorsPerThread == 1) && (filtersPerThread == 4)) {
-    cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 4, 1, zKernelCache >, cudaFuncCachePreferShared);
-    conv2d_acc_gradFilters < B_Y, B_X, 4, 1, zKernelCache > <<<blocks, threads>>>
-      (inputs, gradOutputs, gradFilters,
-       numImages, numImgColors, imgSizeY, imgSizeX,
-       numFilters, filterSizeY, filterSizeX,
-       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  } else if ((colorsPerThread == 2) && (filtersPerThread == 1)) {
-    cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 1, 2, zKernelCache >, cudaFuncCachePreferShared);
-    conv2d_acc_gradFilters < B_Y, B_X, 1, 2, zKernelCache > <<<blocks, threads>>>
-      (inputs, gradOutputs, gradFilters,
-       numImages, numImgColors, imgSizeY, imgSizeX,
-       numFilters, filterSizeY, filterSizeX,
-       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  } else if ((colorsPerThread == 2) && (filtersPerThread == 2)) {
-    cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 2, 2, zKernelCache >, cudaFuncCachePreferShared);
-    conv2d_acc_gradFilters < B_Y, B_X, 2, 2, zKernelCache > <<<blocks, threads>>>
-      (inputs, gradOutputs, gradFilters,
-       numImages, numImgColors, imgSizeY, imgSizeX,
-       numFilters, filterSizeY, filterSizeX,
-       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  } else if ((colorsPerThread == 2) && (filtersPerThread == 4)) {
-    cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 4, 2, zKernelCache >, cudaFuncCachePreferShared);
-    conv2d_acc_gradFilters < B_Y, B_X, 4, 2, zKernelCache > <<<blocks, threads>>>
-      (inputs, gradOutputs, gradFilters,
-       numImages, numImgColors, imgSizeY, imgSizeX,
-       numFilters, filterSizeY, filterSizeX,
-       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  } else if ((colorsPerThread == 4) && (filtersPerThread == 1)) {
-    cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 1, 4, zKernelCache >, cudaFuncCachePreferShared);
-    conv2d_acc_gradFilters < B_Y, B_X, 1, 4, zKernelCache > <<<blocks, threads>>>
-      (inputs, gradOutputs, gradFilters,
-       numImages, numImgColors, imgSizeY, imgSizeX,
-       numFilters, filterSizeY, filterSizeX,
-       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  } else if ((colorsPerThread == 4) && (filtersPerThread == 2)) {
-    cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 2, 4, zKernelCache >, cudaFuncCachePreferShared);
-    conv2d_acc_gradFilters < B_Y, B_X, 2, 4, zKernelCache > <<<blocks, threads>>>
-      (inputs, gradOutputs, gradFilters,
-       numImages, numImgColors, imgSizeY, imgSizeX,
-       numFilters, filterSizeY, filterSizeX,
-       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  } else if ((colorsPerThread == 4) && (filtersPerThread == 4)) {
-    cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 4, 4, zKernelCache >, cudaFuncCachePreferShared);
-    conv2d_acc_gradFilters < B_Y, B_X, 4, 4, zKernelCache > <<<blocks, threads>>>
-      (inputs, gradOutputs, gradFilters,
-       numImages, numImgColors, imgSizeY, imgSizeX,
-       numFilters, filterSizeY, filterSizeX,
-       numModulesY, numModulesX, moduleStrideY, moduleStrideX);
-  } else { assert(0); }
-  
+  if (nocolorCheck) {
+    if ((colorsPerThread == 1) && (filtersPerThread == 1)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 1, 1, zKernelCache, true >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 1, 1, zKernelCache, true > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 1) && (filtersPerThread == 2)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 2, 1, zKernelCache, true >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 2, 1, zKernelCache, true > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 1) && (filtersPerThread == 4)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 4, 1, zKernelCache, true >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 4, 1, zKernelCache, true > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 2) && (filtersPerThread == 1)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 1, 2, zKernelCache, true >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 1, 2, zKernelCache, true > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 2) && (filtersPerThread == 2)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 2, 2, zKernelCache, true >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 2, 2, zKernelCache, true > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 2) && (filtersPerThread == 4)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 4, 2, zKernelCache, true >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 4, 2, zKernelCache, true > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 4) && (filtersPerThread == 1)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 1, 4, zKernelCache, true >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 1, 4, zKernelCache, true > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 4) && (filtersPerThread == 2)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 2, 4, zKernelCache, true >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 2, 4, zKernelCache, true > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    }
+    else if ((colorsPerThread == 4) && (filtersPerThread == 4)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 4, 4, zKernelCache, true >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 4, 4, zKernelCache, true > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else { assert(0); }
+  } else {
+    if ((colorsPerThread == 1) && (filtersPerThread == 1)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 1, 1, zKernelCache, false >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 1, 1, zKernelCache, false > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 1) && (filtersPerThread == 2)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 2, 1, zKernelCache, false >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 2, 1, zKernelCache, false > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 1) && (filtersPerThread == 4)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 4, 1, zKernelCache, false >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 4, 1, zKernelCache, false > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 2) && (filtersPerThread == 1)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 1, 2, zKernelCache, false >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 1, 2, zKernelCache, false > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 2) && (filtersPerThread == 2)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 2, 2, zKernelCache, false >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 2, 2, zKernelCache, false > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 2) && (filtersPerThread == 4)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 4, 2, zKernelCache, false >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 4, 2, zKernelCache, false > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 4) && (filtersPerThread == 1)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 1, 4, zKernelCache, false >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 1, 4, zKernelCache, false > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 4) && (filtersPerThread == 2)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 2, 4, zKernelCache, false >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 2, 4, zKernelCache, false > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else if ((colorsPerThread == 4) && (filtersPerThread == 4)) {
+      cudaFuncSetCacheConfig( conv2d_acc_gradFilters < B_Y, B_X, 4, 4, zKernelCache, false >, cudaFuncCachePreferShared);
+      conv2d_acc_gradFilters < B_Y, B_X, 4, 4, zKernelCache, false > <<<blocks, threads>>>
+	(inputs, gradOutputs, gradFilters,
+	 numImages, numImgColors, imgSizeY, imgSizeX,
+	 numFilters, filterSizeY, filterSizeX,
+	 numModulesY, numModulesX, moduleStrideY, moduleStrideX);
+    } else { assert(0); }
+  }
 }
+
 
