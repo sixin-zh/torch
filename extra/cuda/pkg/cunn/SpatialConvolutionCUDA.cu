@@ -42,7 +42,6 @@ static int cunn_SpatialConvolutionCUDA_updateOutput(lua_State *L)
   THCudaTensor_resize4d(output, nOutputPlane, outputHeight, outputWidth, batchSize);
   
   // asserts
-  luaL_argcheck(L, inputWidth == inputHeight, 1, "input must be square");
   luaL_argcheck(L, kW == kW, 1, "kH must be equal to kW");
   luaL_argcheck(L, dH == dW, 1, "dH must be equal to dW");
 
@@ -93,7 +92,6 @@ static int cunn_SpatialConvolutionCUDA_updateGradInput(lua_State *L)
   THCudaTensor_resize4d(gradInput, nInputPlane, inputHeight, inputWidth, batchSize);
   
   // asserts
-  luaL_argcheck(L, inputWidth == inputHeight, 1, "input must be square");
   luaL_argcheck(L, kW == kW, 1, "kH must be equal to kW");
   luaL_argcheck(L, dH == dW, 1, "dH must be equal to dW");
 
@@ -141,7 +139,6 @@ static int cunn_SpatialConvolutionCUDA_accGradParameters(lua_State *L)
   long outputWidth  = (inputWidth - kW) / dW + 1;
   
   // asserts
-  luaL_argcheck(L, inputWidth == inputHeight, 1, "input must be square");
   luaL_argcheck(L, kW == kW, 1, "kH must be equal to kW");
   luaL_argcheck(L, dH == dW, 1, "dH must be equal to dW");
 
