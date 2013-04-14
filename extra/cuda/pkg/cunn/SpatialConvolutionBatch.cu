@@ -8,55 +8,50 @@
 // blockIdx.x  -> d
 // threadIdx.x -> (m,n) [+blockDim.x]
 // threadIdx.y -> z [+blockDim.y]
-__global__ void _fill_bias(float *bias, float *output,
-			   int batch_n, int output_n, 
-			   int output_h, int output_w) {
+__global__ void _add_bias(float *bias, float *output,
+			  int batch_n, int output_n, 
+			  int output_h, int output_w) {
   output += blockIdx.x*output_h*output_w;
   float b = bias[blockIdx.x];
   int oz,oxy;
   for (oz = threadIdx.y; oz < batch_n; oz += blockDim.y) {
     float *out = output + oz*output_n*output_h*output_w;
     for (oxy = threadIdx.x; oxy < output_h*output_w; oxy += blockDim.x) {
-      out[oxy] = b;
+      out[oxy] += b;
     }
   }
 }
 
-/* // blockIdx.x  -> d */
-/* // threadIdx.x -> (m,n) [+blockDim.x] */
-/* // threadIdx.y -> z [+blockDim.y] */
-/* __global__ void _add_gradBias(float *gradBias, float *gradOutput, float scale, */
-/* 			      int batch_n, int output_n,  */
-/* 			      int output_h, int output_w) { */
-/*   float  */
-/*   gradOutput +=  */
+// ASSUME
+//  dim3 blocks(nOutputPlane);
+//  dim3 threads(32,4);
+// blockIdx.x  -> d
+// threadIdx.x -> (m,n) [+blockDim.x]
+// threadIdx.y -> z [+blockDim.y]
+__global__ void _add_gradBias(float *gradBias, float *gradOutput, float scale,
+			      int batch_n, int output_n,
+			      int output_h, int output_w) {
+  gradOutput += blockIdx.x*output_h*output_w;
+  __shared__ shGrad[128]; // 32*4
+  float g = .0f;
+  int oz,oxy;
+  for (oz = threadIdx.y; oz < batch_n; oz += 4) {
+    float *out = gradOutput + oz*output_n*output_h*output_w;
+    for (oxy = threadIdx.x; oxy < output_h*output_w; oxy += 32) {
+      g += out[oxy];
+    }
+  }
+  shGrad[threadIdx.y*blockDim.x+threadIdx.x] = g;
+  __syncthreads();
 
-/*   // each block does a plane */
-/*   int k = blockIdx.x; */
-/*   float *gradOutput_k = gradOutput + (k + threadIdx.y*output_n)*output_h*output_w; */
-
-/*   // offsets */
-/*   int i_start = threadIdx.x; */
-/*   int i_end = output_w*output_h; */
-/*   int i_step = blockDim.x; */
-
-/*   int tid = threadIdx.x + threadIdx.y * blockDim.x; */
-/*   int nthreads = blockDim.x * blockDim.y; */
-
-/*   // sum output plane k into partial sum array */
-/*   __shared__ float sums[512]; */
-/*   sums[tid] = 0; */
-/*   for (int i=i_start; i<i_end; i+=i_step) { */
-/*     sums[tid] += gradOutput_k[i]; */
-/*   } */
-/*   __syncthreads(); */
-
-/*   // reduce */
-/*   if (tid == 0) { */
-/*     for (int i=0; i<nthreads; i++) */
-/*       gradBias[k] += scale*sums[i]; */
-/*   } */
-/* } */
+  // reduce
+  if (threadIdx.x == 0) {
+    g = .0f;
+    for (oxy = 0; oxy < 128; ++oxy)
+      g += shGrad[oxy];
+    gradBias[blockIdx.x] += scale*g;
+  }
+}
 
 static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
 
@@ -97,13 +92,6 @@ static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
   float *bias_data = THCudaTensor_data(bias);
   float *output_data = THCudaTensor_data(output);
   
-  // fill bias
-  dim3 blocks(nOutputPlane);
-  dim3 threads(32,4);
-  _fill_bias <<<blocks,threads>>> 
-    (bias_data, output_data, 
-     batchSize, nOutputPlane, nOutputRows, nOutputCols);
-
   // convolution
   spatialConvB_updateOutput(
     input_data, weight_data, output_data,
@@ -111,6 +99,13 @@ static int cunn_SpatialConvolutionBatch_updateOutput(lua_State *L) {
     nOutputPlane, nOutputRows, nOutputCols,
     kH, kW, dH, dW
   );
+
+  // add bias
+  dim3 blocks(nOutputPlane);
+  dim3 threads(32,4);
+  _add_bias <<<blocks,threads>>> 
+    (bias_data, output_data, 
+     batchSize, nOutputPlane, nOutputRows, nOutputCols);
 
   return 1;
 }
@@ -201,18 +196,6 @@ static int cunn_SpatialConvolutionBatch_accGradParameters(lua_State *L) {
   float *gradWeight_data = THCudaTensor_data(gradWeight);
   float *gradBias_data = THCudaTensor_data(gradBias);
 
-  /* gradient to bias */
-  /* dim3 blocks(nOutputPlane); */
-  /* long sl; */
-  /* for (sl=0; sl<gradOutput->size[0]; sl+=16) { */
-  /*   int cst = 16; */
-  /*   if ((cst+sl) > gradOutput->size[0]) cst = gradOutput->size[0] - sl; */
-  /*   dim3 threads(16, cst); */
-  /*   _compute_gradBias <<<blocks, threads>>>  */
-  /*     (gradBias_data, gradOutput_data + sl*gradOutput->stride[0], scale, */
-  /*      nOutputPlane, nOutputRows, nOutputCols); */
-  /* } */
-
   /* gradient to kernel */
   spatialConvB_accGradParameters(
     input_data, gradOutput_data, gradWeight_data,
@@ -220,6 +203,13 @@ static int cunn_SpatialConvolutionBatch_accGradParameters(lua_State *L) {
     nOutputPlane, nOutputRows, nOutputCols,
     kH, kW, dH, dW
   );
+
+  // add gradBias
+  dim3 blocks(nOutputPlane);
+  dim3 threads(32,4);
+  __add_gradBias <<<blocks,threads>>> 
+    (gradBias_data, gradOutput_data, scale,
+     batchSize, nOutputPlane, nOutputRows, nOutputCols);
 
   return 0;
 }
