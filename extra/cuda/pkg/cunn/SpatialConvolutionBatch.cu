@@ -102,16 +102,6 @@ static int cunn_SpatialConvolutionBatch_updateGradInput(lua_State *L) {
   luaL_argcheck(L, THCudaTensor_isContiguous(gradOutput), 1, "gradOutput must be contiguous");
   luaL_argcheck(L, THCudaTensor_isContiguous(gradInput), 1, "gradInput must be contiguous");
 
-  // asserts
-  luaL_argcheck(L, inputWidth == inputHeight, 1, "input must be square");
-  luaL_argcheck(L, kW == kW, 1, "kH must be equal to kW");
-  luaL_argcheck(L, dH == dW, 1, "dH must be equal to dW");
-
-  // all the data must be contiguous: 
-  luaL_argcheck(L, THCudaTensor_isContiguous(gradInput), 2, "input must be contiguous");
-  luaL_argcheck(L, THCudaTensor_isContiguous(weight), 1, "weight must be contiguous");
-  luaL_argcheck(L, THCudaTensor_isContiguous(gradOutput), 1, "output must be contiguous");
-
   // raw pointers 
   float *gradInput_data = THCudaTensor_data(gradInput);
   float *weight_data = THCudaTensor_data(weight);
@@ -128,7 +118,7 @@ static int cunn_SpatialConvolutionBatch_updateGradInput(lua_State *L) {
   return 1;
 }
 
-__global__ void compute_gradBias(float *gradBias, float *gradOutput, float scale,
+__global__ void _compute_gradBias(float *gradBias, float *gradOutput, float scale,
                                  int output_n, int output_h, int output_w)
 {
   // each block does a plane
@@ -202,12 +192,12 @@ static int cunn_SpatialConvolutionBatch_accGradParameters(lua_State *L) {
     int cst = 16;
     if ((cst+sl) > gradOutput->size[0]) cst = gradOutput->size[0] - sl;
     dim3 threads(16, cst);
-    compute_gradBias <<<blocks, threads>>> (gradBias_data, gradOutput_data + sl*gradOutput->stride[0], scale,
+    _compute_gradBias <<<blocks, threads>>> (gradBias_data, gradOutput_data + sl*gradOutput->stride[0], scale,
 					    nOutputPlane, nOutputRows, nOutputCols);
   }
 
   /* gradient to kernel */
-  spatialConvB_accGradParameter(
+  spatialConvB_accGradParameters(
     input_data, gradOutput_data, gradWeight_data,
     batchSize, nInputPlane, nInputRows, nInputCols,
     nOutputPlane, nOutputRows, nOutputCols,
